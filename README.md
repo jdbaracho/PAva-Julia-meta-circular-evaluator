@@ -1,2 +1,2 @@
-# -PAva-Julia-meta-circular-evaluator
+# Julia Meta-Circular Evalutor
 Project for Advanced Programming course: Julia meta-circular evaluator.
