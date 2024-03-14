@@ -1,15 +1,26 @@
-function meta_eval(expr, env)
+function metajulia_eval(expr, env)
     if is_self_evaluating(expr)
         expr
     elseif is_name(expr)
-        println(">> name")
         #eval_name(expr, env)
     elseif is_let(expr)
-        println(">> let")
         #eval_let(exp, env)
     else
         throw(error("Unknown expression type -- EVAL $(expr)"))
     end
+end
+
+function repl()
+    print(">> ")
+    input = readline()
+    expr = Meta.parse(input)
+    while Meta.isexpr(expr, :incomplete)
+        input *= readline()
+        expr = Meta.parse(input)
+    end
+    output = metajulia_eval(expr, [])
+    println(output)
+    repl()
 end
 
 function is_self_evaluating(expr)
@@ -23,6 +34,9 @@ function is_name(expr)
 end
 
 function is_let(expr)
-    expr isa Expr && expr.head == :let
+    Meta.isexpr(expr, :let)
+end
+
+function let_names(expr)
 end
 
