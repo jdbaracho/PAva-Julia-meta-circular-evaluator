@@ -1,7 +1,9 @@
 const EMPTY_ENVIRONMENT = []
 
 function metajulia_eval(expr, env)
-	if is_self_evaluating(expr)
+	if is_incomplete(expr)
+		error("EVAL: Incomplete expression!")
+	elseif is_self_evaluating(expr)
 		expr
 	elseif is_name(expr)
 		eval_name(expr, env)
@@ -52,7 +54,11 @@ end
 ## Evals
 
 function eval_let(expr, env)
-	assignments = expr.args[1].args
+	if Meta.isexpr(expr.args[1], :block)
+		assignments = expr.args[1].args
+	else
+		assignments = [expr.args[1]]
+	end
 	names = map((assignment) -> assignment.args[1], assignments)
 	values = map((assignment) -> metajulia_eval(assignment.args[2], env), assignments)
 	extended_env = augment_environment(names, values, env)
@@ -114,4 +120,8 @@ end
 
 function is_let(expr)
     Meta.isexpr(expr, :let)
+end
+
+function is_incomplete(expr)
+	Meta.isexpr(expr, :incomplete)
 end
