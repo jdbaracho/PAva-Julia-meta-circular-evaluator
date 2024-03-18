@@ -124,7 +124,7 @@ function is_and_operator(expr)
 end
 
 function is_if_statement(expr)
-	expr.head == :if
+	expr.head == :if || expr.head == :elseif 
 end
 
 function is_block(expr)
