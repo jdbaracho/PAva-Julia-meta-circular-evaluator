@@ -3,10 +3,12 @@ const EMPTY_ENVIRONMENT = []
 function metajulia_eval(expr, env)
 	if is_incomplete(expr)
 		error("EVAL: Incomplete expression!")
+	elseif is_dump(expr)
+		println(dump(env))
 	elseif is_self_evaluating(expr)
 		expr
 	elseif is_name(expr)
-		eval_name(expr, env)
+		eval_name(expr, env)[2]
 	elseif expr isa Expr
 		if is_let(expr)
 			eval_let(expr, env)
@@ -88,7 +90,8 @@ end
 #### Name
 
 function eval_name(name, env)
-	get_name(name, env)[2]
+	# was getting some weird error with oob access so moved the [2] up
+	get_name(name, env)
 end
 
 function get_name(name, env)
@@ -208,6 +211,10 @@ function is_quit(expr)
 	expr == "quit"
 end
 
+function is_dump(expr)
+	expr == :dump
+end
+
 ## Helper Functions
 
 function filter_linenumbernodes(args)
@@ -229,7 +236,6 @@ function get_custom_function(name, env)
 		end
 	end
 end
-
 
 # println(dump(Meta.parse("triple(a) = a + a + a")))
 repl()
