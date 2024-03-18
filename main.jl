@@ -3,6 +3,8 @@ const EMPTY_ENVIRONMENT = []
 function metajulia_eval(expr, env)
 	if is_incomplete(expr)
 		error("EVAL: Incomplete expression!")
+	elseif is_quit(expr)
+		nothing
 	elseif is_dump(expr)
 		println(dump(env))
 	elseif is_self_evaluating(expr)
@@ -40,15 +42,16 @@ end
 
 function repl()
     print(">> ")
-    input = readline()
-	if input == "quit"
-		return
-	end
+	input = readline(keep=true)
 	expr = Meta.parse(input)
     while Meta.isexpr(expr, :incomplete)
-        input *= readline()
+		print("   ")
+        input *= readline(keep=true)
         expr = Meta.parse(input)
     end
+	if expr == :quit
+		return
+	end
 	output = metajulia_eval(expr, EMPTY_ENVIRONMENT)
     println(output)
     repl()
@@ -106,27 +109,48 @@ end
 
 #### Call
 
+# Check previous commits for more readable version
 function eval_call(expr, env)
 	# Evaluate/Resolve the argument values
-	resolved_args = map((arg) -> metajulia_eval(arg, env), expr.args[2:end])
-	call_symbol = expr.args[1]
-	try
-		# Try to find the function in base Julia
-		call_func = getfield(Base, call_symbol)
-		call_func(resolved_args...)
-	catch e
-		if !(e isa UndefVarError)
-			rethrow(e)
-		end
-		# Try to find the function definition in the environment
-		call_pair = get_custom_function(call_symbol, env)
+	values = map((arg) -> metajulia_eval(arg, env), expr.args[2:end])
+	extended_env = copy(env)
+	next_expr = nothing
+
+	if is_anonymous_function(expr)
+		# Anonymous function
 		# Map argument symbols to argument values (resolved_args) in function block environment
-		names = call_pair[1].args[2:end]
-		values = resolved_args
-		extended_env = augment_environment(names, values, copy(env))
-		# Evaluate the function block with the extended environment
-		metajulia_eval(call_pair[2], extended_env)
+		names = expr.args[1].args[1]
+		if names isa Symbol
+			names = [names]
+		else # Expression
+			names = names.args
+		end
+		next_expr = expr.args[1].args[2]
+	else
+		call_symbol = expr.args[1]
+		try
+			# Try to find the function in base Julia
+			call_func = getfield(Base, call_symbol)
+			# If no error thrown, function exists, just return the value
+			return call_func(values...)
+		catch e
+			if !(e isa UndefVarError)
+				rethrow(e)
+			end
+			# Try to find the function definition in the environment
+			call_pair = get_custom_function(call_symbol, env)
+			# Map argument symbols to argument values (resolved_args) in function block environment
+			names = call_pair[1].args[2:end]
+			next_expr = call_pair[2]
+		end
 	end
+
+	if length(names) > 0
+		# Function has arguments and so the env needs to be augmented
+		extended_env = augment_environment(names, values, extended_env)
+	end
+	# Evaluate the function block with the extended environment
+	metajulia_eval(next_expr, extended_env)
 end
 
 #### Assignment
@@ -203,6 +227,10 @@ function is_function_definition(expr)
 	Meta.isexpr(expr, :(=)) && Meta.isexpr(expr.args[1], :call) && Meta.isexpr(expr.args[2], :block)
 end
 
+function is_anonymous_function(expr)
+	Meta.isexpr(expr.args[1], :->)
+end
+
 function is_assignment(expr)
 	Meta.isexpr(expr, :(=))
 end
@@ -213,6 +241,10 @@ end
 
 function is_dump(expr)
 	expr == :dump
+end
+
+function is_quit(expr)
+	expr == :quit
 end
 
 ## Helper Functions
@@ -237,5 +269,4 @@ function get_custom_function(name, env)
 	end
 end
 
-# println(dump(Meta.parse("triple(a) = a + a + a")))
 repl()
