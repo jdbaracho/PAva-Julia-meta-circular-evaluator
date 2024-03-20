@@ -41,7 +41,7 @@ function metajulia_eval(expr, env)
 end
 
 function repl()
-    print(">> ")
+  print(">> ")
 	input = readline(keep=true)
 	expr = Meta.parse(input)
     while Meta.isexpr(expr, :incomplete)
@@ -53,8 +53,8 @@ function repl()
 		return
 	end
 	output = metajulia_eval(expr, EMPTY_ENVIRONMENT)
-    println(output)
-    repl()
+  println(output)
+  repl()
 end
 
 ## Evals
@@ -94,31 +94,31 @@ end
 
 function eval_name(name, env)
 	# was getting some weird error with oob access so moved the [2] up
-	get_name(name, env)
+  env[get_name_index(name, env)]
 end
 
-function get_name(name, env)
+# Gets index of name in env
+function get_name_index(name, env)
 	if isempty(env)
 		error("Unbound name -- EVAL-NAME(", name, ")")
 	elseif first(env)[1] == name
-		first(env)
+    1
 	else
-		eval_name(name, env[2:end])
+		get_name_index(name, env[2:end]) + 1
 	end
 end
 
 #### Call
 
-# Check previous commits for more readable version
 function eval_call(expr, env)
 	# Evaluate/Resolve the argument values
 	values = map((arg) -> metajulia_eval(arg, env), expr.args[2:end])
-	extended_env = copy(env)
-	next_expr = nothing
+	extended_env = copy(env) # Environment for the function block
+	next_expr = nothing # Function block (next expression to be evaluated)
 
 	if is_anonymous_function(expr)
 		# Anonymous function
-		# Map argument symbols to argument values (resolved_args) in function block environment
+		# Map argument symbols to argument values in function block environment
 		names = expr.args[1].args[1]
 		if names isa Symbol
 			names = [names]
@@ -133,15 +133,17 @@ function eval_call(expr, env)
 			call_func = getfield(Base, call_symbol)
 			# If no error thrown, function exists, just return the value
 			return call_func(values...)
-		catch e
-			if !(e isa UndefVarError)
-				rethrow(e)
-			end
+		catch
+			# if !(e isa UndefVarError)
+			# 	rethrow(e)
+			# end
+
 			# Try to find the function definition in the environment
-			call_pair = get_custom_function(call_symbol, env)
-			# Map argument symbols to argument values (resolved_args) in function block environment
-			names = call_pair[1].args[2:end]
-			next_expr = call_pair[2]
+      # (name . (args/names, block/next_expr))
+      call_pair = env[get_name_index(call_symbol, env)][2]
+			# Map argument symbols to argument values in function block environment
+      names = call_pair[1]
+      next_expr = call_pair[2]
 		end
 	end
 
@@ -158,29 +160,34 @@ end
 function eval_assignment(expr, env)
 	name = expr.args[1]
 	value = expr.args[2]
+  ret = nothing
 	is_function_def = is_function_definition(expr)
-	if !is_function_def
-		# Not a function definition, evaluate the right side
-		value = metajulia_eval(value, env)
-	end
-
-	try
-		# Search for the name in the environment
-		var = get_name(name, env)
-		# Update the value of the variable in the environment
-		var[2] = value
-	catch
-		# If the name is not found, add it to the environment
-		# Destructively? change the environment
-		augment_environment([name], [value], env)
-	end
-	if is_function_def
-		# Return the function definition
-		"<function>"
-	else
-		# Return the value of the assignment
-		value
-	end
+	
+  try
+    var = nothing
+    if !is_function_def
+      # Set return to right side value
+      ret = value
+	  	# Not a function definition, evaluate the right side
+	  	value = metajulia_eval(value, env)
+    else
+	    # Set return to <function>
+      ret = "<function>"
+      name = expr.args[1].args[1]
+      args = expr.args[1].args[2:end]
+      # Value to be saved will be pair (args, func_body)
+      value = (args, value)
+	  end
+	  # Search for the name in the environment
+    var = get_name_index(name, env)
+	  # Found! Update the value of the variable in the environment
+    env[var] = (name, value)
+  catch
+	  # If the name is not found, add it to the environment
+	  # Destructively? change the environment
+	  augment_environment([name], [value], env)
+  end
+  ret
 end
 
 ## Type tests
@@ -235,10 +242,6 @@ function is_assignment(expr)
 	Meta.isexpr(expr, :(=))
 end
 
-function is_quit(expr)
-	expr == "quit"
-end
-
 function is_dump(expr)
 	expr == :dump
 end
@@ -252,21 +255,6 @@ end
 function filter_linenumbernodes(args)
 	# Filter out linenumbernodes
 	filter((arg) -> !(arg isa LineNumberNode), args)
-end
-
-function get_custom_function(name, env)
-	if isempty(env)
-		error("Unbound name -- GET-CUSTOM-FUNCTION(", name, ")")
-	else
-		# Retrieve first pair (signature, block)
-		curr = first(env)
-		if Meta.isexpr(curr[1], :call) && curr[1].args[1] == name
-			# Found function definition
-			curr
-		else
-			get_custom_function(name, env[2:end])
-		end
-	end
 end
 
 repl()
