@@ -11,6 +11,8 @@ function metajulia_eval(expr, env)
         expr
     elseif is_name(expr)
         eval_name(expr, env)[2]
+    elseif is_quote(expr)
+        eval_quote(expr, env)
     elseif expr isa Expr
         if is_let(expr)
             eval_let(expr, env)
@@ -199,6 +201,16 @@ function eval_assignment(expr, env)
     ret
 end
 
+#### Quote
+
+function eval_quote(expr, env)
+    if expr isa Expr
+        expr.args = map((arg) -> Meta.isexpr(arg, :$) ? metajulia_eval(arg.args[1], env)
+         : eval_quote(arg, env), expr.args)
+    end
+    expr
+end
+
 ## Type tests
 
 function is_self_evaluating(expr)
@@ -249,6 +261,10 @@ end
 
 function is_assignment(expr)
     Meta.isexpr(expr, :(=))
+end
+
+function is_quote(expr)
+    expr isa QuoteNode || Meta.isexpr(expr, :quote)
 end
 
 function is_dump(expr)
