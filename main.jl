@@ -3,8 +3,6 @@ const EMPTY_ENVIRONMENT = []
 function metajulia_eval(expr, env)
     if is_incomplete(expr)
         error("EVAL: Incomplete expression!")
-    elseif is_quit(expr)
-        nothing
     elseif is_dump(expr)
         println(dump(env))
     elseif is_self_evaluating(expr)
@@ -54,7 +52,11 @@ function repl()
     if expr == :quit
         return
     end
-    output = metajulia_eval(expr, EMPTY_ENVIRONMENT)
+	if isnothing(expr)
+		repl()
+	end
+    
+	output = metajulia_eval(expr, EMPTY_ENVIRONMENT)
     println(output)
     repl()
 end
