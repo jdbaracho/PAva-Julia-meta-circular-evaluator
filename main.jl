@@ -74,9 +74,9 @@ function eval_let(expr, env)
 		for a in assignments
 			name = a.args[1]
 			# if function definition, dont eval the assignment value (function block)
-			value = is_function_definition(a) ? a.args[2] : metajulia_eval(a.args[2], env)
+			value = is_function_definition(a) ? a.args[2] : metajulia_eval(a.args[2], extended_env)
 			# extend environment for each assignment
-			extended_env = augment_environment(names, values, extended_env)
+			extended_env = augment_environment([name], [value], extended_env)
 		end
 
 		# names = map((assignment) -> assignment.args[1], assignments)
