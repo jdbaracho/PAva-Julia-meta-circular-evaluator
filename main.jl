@@ -38,24 +38,24 @@ function metajulia_eval(expr, env)
 end
 
 function repl()
-  print(">> ")
-  input = readline(keep=true)
-  expr = Meta.parse(input)
-  while Meta.isexpr(expr, :incomplete)
-      print("   ")
-      input *= readline(keep=true)
-      expr = Meta.parse(input)
-  end
-  if expr == :quit
-      return
-  end
-	if isnothing(expr)
-		repl()
-	end
-    
-	output = metajulia_eval(expr, EMPTY_ENVIRONMENT)
-  println(output)
-  repl()
+    print(">> ")
+    input = readline(keep=true)
+    expr = Meta.parse(input)
+    while Meta.isexpr(expr, :incomplete)
+        print("   ")
+        input *= readline(keep=true)
+        expr = Meta.parse(input)
+    end
+    if expr == :quit
+        return
+    end
+    if isnothing(expr)
+        repl()
+    end
+
+    output = metajulia_eval(expr, EMPTY_ENVIRONMENT)
+    println(output)
+    repl()
 end
 
 ## Evals #########################################
@@ -63,32 +63,32 @@ end
 #### Block
 
 function eval_block(expr, env)
-   # Filter out linenumbernodes
-   lines = filter_linenumbernodes(expr.args)
-   resolved_lines = map((line) -> metajulia_eval(line, env), lines)
-   resolved_lines[end]
+    # Filter out linenumbernodes
+    lines = filter_linenumbernodes(expr.args)
+    resolved_lines = map((line) -> metajulia_eval(line, env), lines)
+    resolved_lines[end]
 end
 
 #### If statement
 
 function eval_if_statement(expr, env)
-   if metajulia_eval(expr.args[1], env)
-       metajulia_eval(expr.args[2], env)
-   else
-       metajulia_eval(expr.args[3], env)
-   end
+    if metajulia_eval(expr.args[1], env)
+        metajulia_eval(expr.args[2], env)
+    else
+        metajulia_eval(expr.args[3], env)
+    end
 end
 
 #### Or (||)
 
 function eval_or_operator(expr, env)
-  metajulia_eval(expr.args[1], env) || metajulia_eval(expr.args[2], env)
+    metajulia_eval(expr.args[1], env) || metajulia_eval(expr.args[2], env)
 end
 
 #### And (&&)
 
 function eval_and_operator(expr, env)
-  metajulia_eval(expr.args[1], env) && metajulia_eval(expr.args[2], env)
+    metajulia_eval(expr.args[1], env) && metajulia_eval(expr.args[2], env)
 end
 
 #### Let
@@ -130,9 +130,9 @@ end
 function eval_name(name, env)
     obj = env[get_name_index(name, env)][2]
     if Meta.isexpr(obj, :typed)
-      "<$(obj.args[1])>" # TODO use structs to make generic method to get output Base.show(io::IO, ...
+        "<$(obj.args[1])>" # TODO use structs to make generic method to get output Base.show(io::IO, ...
     else
-      obj
+        obj
     end
 end
 
@@ -174,7 +174,7 @@ function eval_call(expr, env)
             # (name . (args/names, block/next_expr)) ???? TODO
             call_obj = Symbol(nothing)
             while (call_obj isa Symbol)
-              call_obj = env[get_name_index(call_symbol, env)][2]
+                call_obj = env[get_name_index(call_symbol, env)][2]
             end
             # call_pair = env[get_name_index(call_symbol, env)][2]
             # Map argument symbols to argument values in function block environment
@@ -182,7 +182,7 @@ function eval_call(expr, env)
             next_expr = call_obj.args[2]
 
             if Meta.isexpr(call_obj, :fexpr)
-              eval_args = false
+                eval_args = false
             end
         catch
             values = map((arg) -> metajulia_eval(arg, env), values)
@@ -192,11 +192,11 @@ function eval_call(expr, env)
             return call_func(values...)
         end
     end
-    
+
     if eval_args
-      values = map((arg) -> metajulia_eval(arg, env), values)
+        values = map((arg) -> metajulia_eval(arg, env), values)
     else
-      values = wrap_quote(values)
+        values = wrap_quote(values)
     end
 
     if length(names) > 0
@@ -222,7 +222,7 @@ function make_assignment(name, value, env)
     end
     # Return type or value
     if Meta.isexpr(value, :typed)
-      return "<$(value.args[1])>"
+        return "<$(value.args[1])>"
     end
     value
 end
@@ -230,23 +230,23 @@ end
 # Doesn't evaluate right side of assignment (functions, fexprs, macros)
 # TODO probably need to further separate macros and fexprs special things
 function eval_assignment_typed(type, expr, env)
-  name = expr.args[1].args[1]
-  args = expr.args[1].args[2:end]
-  body = expr.args[2]
-  # Value to be saved
-  value = Expr(:typed, type, args, body)
-  # Do the assignment
-  make_assignment(name, value, env)
+    name = expr.args[1].args[1]
+    args = expr.args[1].args[2:end]
+    body = expr.args[2]
+    # Value to be saved
+    value = Expr(:typed, type, args, body)
+    # Do the assignment
+    make_assignment(name, value, env)
 end
 
 # Evaluate assignment for a variable (right side isn't a function body)
 function eval_assignment_var(expr, env)
-  name = expr.args[1]
-  rightSide = expr.args[2]
-  # Not a function definition, evaluate the right side
-  value = metajulia_eval(rightSide, env)
-  # Do the assignment
-  make_assignment(name, value, env)
+    name = expr.args[1]
+    rightSide = expr.args[2]
+    # Not a function definition, evaluate the right side
+    value = metajulia_eval(rightSide, env)
+    # Do the assignment
+    make_assignment(name, value, env)
 end
 
 #### Quote
@@ -254,26 +254,26 @@ end
 # This is really ugly and maybe we can just ditch QuoteNodes
 function eval_quote(expr, depth, env)
     if depth > 0
-      if expr isa Expr
-        expr.args = map((arg) -> Meta.isexpr(arg, :$) ? metajulia_eval(arg.args[1], env)
-        : (arg isa QuoteNode ? eval_quote_node(expr) : eval_quote(arg, depth-1, env)), expr.args)
-      elseif expr isa QuoteNode
-        return eval_quote_node(expr)
-      end
+        if expr isa Expr
+            expr.args = map((arg) -> Meta.isexpr(arg, :$) ? metajulia_eval(arg.args[1], env)
+                                     : (arg isa QuoteNode ? eval_quote_node(expr) : eval_quote(arg, depth - 1, env)), expr.args)
+        elseif expr isa QuoteNode
+            return eval_quote_node(expr)
+        end
     end
     expr
 end
 
 function eval_quote_node(node)
-  is_self_evaluating(node.value) ? node.value : node
+    is_self_evaluating(node.value) ? node.value : node
 end
 
 ## Type tests #########################################
 
 function is_self_evaluating(expr)
     expr isa Number ||
-    expr isa String ||
-    expr isa Bool
+        expr isa String ||
+        expr isa Bool
 end
 
 function is_call(expr)
@@ -317,7 +317,7 @@ function is_assignment_function(expr)
 end
 
 function is_assignment_var(expr)
-  Meta.isexpr(expr, :(=)) && !is_assignment_function(expr)
+    Meta.isexpr(expr, :(=)) && !is_assignment_function(expr)
 end
 
 function is_assignment_fexpr(expr)
@@ -348,7 +348,7 @@ function filter_linenumbernodes(args)
 end
 
 function wrap_quote(args)
-  map((arg) -> arg isa Symbol ? QuoteNode(arg) : Expr(:quote, arg), args)
+    map((arg) -> arg isa Symbol ? QuoteNode(arg) : Expr(:quote, arg), args)
 end
 
 repl()
