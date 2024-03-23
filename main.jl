@@ -1,10 +1,10 @@
-const EMPTY_ENVIRONMENT = []
+const ENVIRONMENT = [Dict()]
 
 function metajulia_eval(expr, env)
     if is_incomplete(expr)
         error("EVAL: Incomplete expression!")
     elseif is_dump(expr)
-        println(dump(env))
+        println(env)
     elseif is_self_evaluating(expr)
         expr
     elseif is_name(expr)
@@ -13,6 +13,8 @@ function metajulia_eval(expr, env)
         eval_quote(expr, 2, env)
     elseif is_let(expr)
         eval_let(expr, env)
+    elseif is_anonymous_function(expr)
+        eval_anonymous_function(expr, env)
     elseif is_assignment_var(expr)
         eval_assignment_var(expr, env)
     elseif is_assignment_function(expr)
@@ -53,10 +55,96 @@ function repl()
         repl()
     end
 
-    output = metajulia_eval(expr, EMPTY_ENVIRONMENT)
-    println(output)
+    output = metajulia_eval(expr, ENVIRONMENT)
+    display(output)
     repl()
 end
+
+function display(value)
+    if isnothing(value)
+        println()
+    elseif Meta.isexpr(value, :typed)
+        println("<$(value.args[1])>")
+    else
+        println(value)
+    end
+end
+
+## Environment ###################################
+#region
+
+function extend_environment(names, values, env)
+    new_env = copy(env)
+    local_env = Dict(names[i] => values[i] for i in eachindex(names))
+    pushfirst!(new_env, local_env)
+end
+
+function augment_environment(names, values, env)
+    if length(env) == 1
+        augment_global(names, values, env)
+    else
+        augment_local(names, values, env)
+    end
+end
+
+function augment_global(names, values, env)
+    for i in eachindex(names)
+        global_environment(env)[names[i]] = values[1]
+    end
+end
+
+function augment_local(names, values, env)
+    for i in eachindex(names)
+        local_env = search_local(names[i], env)
+        if isnothing(local_env)
+            env[1][names[i]] = values[i]
+        else
+            local_env[names[i]] = values[i]
+        end
+    end
+end
+
+function augment_current(names, values, env)
+    for i in eachindex(names)
+        env[1][names[i]] = values[i]
+    end
+    env
+end
+
+function global_environment(env)
+    env[end]
+end
+
+function search_env(name, env)
+    name_env = search_local(name, env)
+    if isnothing(name_env)
+        name_env = search_global(name, env)
+    end
+    name_env
+end
+
+function search_global(name, env)
+    global_env = global_environment(env)
+    if haskey(global_env, name)
+        global_env
+    else
+        nothing
+    end
+end
+
+function search_local(name, env)
+    # search all local envs
+    for i in eachindex(env[1:end-1])
+        if haskey(env[i], name)
+            # return first env with name
+            return env[i]
+        end
+    end
+    # or nothing if name not defined
+    nothing
+end
+
+#endregion
 
 ## Evals #########################################
 
@@ -101,50 +189,38 @@ function eval_let(expr, env)
         assignments = [expr.args[1]]
     end
 
-    extended_env = copy(env)
+    extended_env = extend_environment([], [], env)
     if length(assignments) > 0
 
         for a in assignments
-            name = a.args[1]
-            # if function definition, dont eval the assignment value (function block) TODO macros, fexprs
-            value = is_assignment_function(a) ? a.args[2] : metajulia_eval(a.args[2], extended_env)
+            # if function definition, dont eval the assignment
+            # value (function block) TODO macros, fexprs
+            if is_assignment_function(a)
+                name = a.args[1].args[1]
+                args = a.args[1].args[2:end]
+                body = a.args[2]
+                # Value to be saved (env = environment where function was defined)
+                value = Expr(:typed, :function, args, body, env)
+            else
+                name = a.args[1]
+                value = metajulia_eval(a.args[2], extended_env)
+            end
             # extend environment for each assignment
-            extended_env = augment_environment([name], [value], extended_env)
+            extended_env = augment_current([name], [value], extended_env)
         end
     end
     # let block
     metajulia_eval(expr.args[2], extended_env)
 end
 
-function augment_environment(names, values, env)
-    if length(names) > 1
-        extended_env = augment_environment(names[2:end], values[2:end], env)
-    else
-        extended_env = env
-    end
-    pushfirst!(extended_env, (names[1], values[1]))
-end
-
 #### Name
 
 function eval_name(name, env)
-    obj = env[get_name_index(name, env)][2]
-    if Meta.isexpr(obj, :typed)
-        "<$(obj.args[1])>" # TODO use structs to make generic method to get output Base.show(io::IO, ...
-    else
-        obj
-    end
-end
-
-# Gets index of name in env
-function get_name_index(name, env)
-    if isempty(env)
+    name_env = search_env(name, env)
+    if isnothing(name_env)
         error("Unbound name -- EVAL-NAME(", name, ")")
-    elseif first(env)[1] == name
-        1
-    else
-        get_name_index(name, env[2:end]) + 1
     end
+    name_env[name]
 end
 
 #### Call
@@ -154,42 +230,49 @@ function eval_call(expr, env)
     # Evaluate/Resolve the argument values
     values = expr.args[2:end]
     extended_env = copy(env) # Environment for the function block
-    next_expr = nothing # Function block (next expression to be evaluated)
+    body = nothing # Function block (next expression to be evaluated)
     eval_args = true
 
-    if is_anonymous_function(expr)
+    if is_anonymous_call(expr)
         # Anonymous function
         # Map argument symbols to argument values in function block environment
-        names = expr.args[1].args[1]
-        if names isa Symbol
-            names = [names]
+        arg_names = expr.args[1].args[1]
+        if arg_names isa Symbol
+            arg_names = [arg_names]
         else # Expression
-            names = names.args
+            arg_names = arg_names.args
         end
-        next_expr = expr.args[1].args[2]
+        body = expr.args[1].args[2]
+        func_env = extended_env
     else
         call_symbol = expr.args[1]
-        try
-            # Try to find the function definition in the environment
-            # (name . (args/names, block/next_expr)) ???? TODO
-            call_obj = Symbol(nothing)
-            while (call_obj isa Symbol)
-                call_obj = env[get_name_index(call_symbol, env)][2]
-            end
-            # call_pair = env[get_name_index(call_symbol, env)][2]
-            # Map argument symbols to argument values in function block environment
-            names = call_obj.args[1]
-            next_expr = call_obj.args[2]
+        # TODO handle call value being a symbol
+        call_env = search_env(call_symbol, env)
 
-            if Meta.isexpr(call_obj, :fexpr)
+        # if not in env
+        if isnothing(call_env)
+            # if not base function
+            if !(call_symbol in names(Base))
+                error("Unbound name -- EVAL-CALL(", call_symbol, ")")
+
+            else # in Base
+                values = map((arg) -> metajulia_eval(arg, env), values)
+                call_func = getfield(Base, call_symbol)
+                return call_func(values...)
+            end
+
+        else # in env
+            # Map argument symbols to argument values in function block environment
+            # call_value = Expr(:typed, type, args, block)
+            call_value = call_env[call_symbol]
+            type = call_value.args[1]
+            arg_names = call_value.args[2]
+            body = call_value.args[3]
+            func_env = call_value.args[4]
+
+            if type == :fexpr
                 eval_args = false
             end
-        catch
-            values = map((arg) -> metajulia_eval(arg, env), values)
-            # Try to find the function in base Julia
-            call_func = getfield(Base, call_symbol)
-            # If no error thrown, function exists, just return the value
-            return call_func(values...)
         end
     end
 
@@ -199,31 +282,17 @@ function eval_call(expr, env)
         values = wrap_quote(values)
     end
 
-    if length(names) > 0
-        # Function has arguments and so the env needs to be augmented
-        extended_env = augment_environment(names, values, extended_env)
-    end
+    # function call extends environment where it was created
+    extended_env = extend_environment(arg_names, values, func_env)
+    
     # Evaluate the function block with the extended environment
-    metajulia_eval(next_expr, extended_env)
+    metajulia_eval(body, extended_env)
 end
 
 #### Assignment
 
 function make_assignment(name, value, env)
-    try
-        # Search for the name in the environment
-        var = get_name_index(name, env)
-        # Found! Update the value of the variable in the environment
-        env[var] = (name, value)
-    catch
-        # If the name is not found, add it to the environment
-        # Destructively? change the environment
-        augment_environment([name], [value], env)
-    end
-    # Return type or value
-    if Meta.isexpr(value, :typed)
-        return "<$(value.args[1])>"
-    end
+    augment_environment([name], [value], env)
     value
 end
 
@@ -233,8 +302,8 @@ function eval_assignment_typed(type, expr, env)
     name = expr.args[1].args[1]
     args = expr.args[1].args[2:end]
     body = expr.args[2]
-    # Value to be saved
-    value = Expr(:typed, type, args, body)
+    # Value to be saved (env = environment where function was defined)
+    value = Expr(:typed, type, args, body, env)
     # Do the assignment
     make_assignment(name, value, env)
 end
@@ -247,6 +316,14 @@ function eval_assignment_var(expr, env)
     value = metajulia_eval(rightSide, env)
     # Do the assignment
     make_assignment(name, value, env)
+end
+
+### Anonymous Function
+
+function eval_anonymous_function(expr, env)
+    args = expr.args[1] isa Symbol ? [expr.args[1]] : expr.args[1].args
+    body = expr.args[2]
+    Expr(:typed, :function, args, body, env)
 end
 
 #### Quote
@@ -309,6 +386,10 @@ function is_incomplete(expr)
 end
 
 function is_anonymous_function(expr)
+    Meta.isexpr(expr, :->)
+end
+
+function is_anonymous_call(expr)
     Meta.isexpr(expr.args[1], :->)
 end
 
@@ -340,7 +421,7 @@ function is_quit(expr)
     expr == :quit
 end
 
-## Helper Functions #########################################
+## Helper Functions ##############################
 
 function filter_linenumbernodes(args)
     # Filter out linenumbernodes
