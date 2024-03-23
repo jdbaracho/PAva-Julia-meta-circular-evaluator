@@ -23,6 +23,8 @@ function metajulia_eval(expr, env)
         eval_assignment_typed(:fexpr, expr, env)
     elseif is_assignment_macro(expr)
         eval_assignment_typed(:macro, expr, env)
+    elseif is_global(expr)
+        eval_global(expr, env)
     elseif is_call(expr)
         eval_call(expr, env)
     elseif is_or_operator(expr)
@@ -190,7 +192,7 @@ function eval_let(expr, env)
     end
 
     extended_env = extend_environment([], [], env)
-    if length(assignments) > 0
+    if length(assignments) > 0 # TODO i think we can remove this
 
         for a in assignments
             # if function definition, dont eval the assignment
@@ -318,6 +320,21 @@ function eval_assignment_var(expr, env)
     make_assignment(name, value, env)
 end
 
+function eval_global(expr, env)
+    # remove global
+    expr = expr.args[1]
+
+    assignemnt = expr.args[1]
+    if assignemnt isa Expr
+        name = assignemnt.args[1]
+    else # var assignment
+        name = assignemnt
+    end
+
+    value = metajulia_eval(expr, env)
+    make_assignment(name, value, [global_environment(env)])
+end
+
 ### Anonymous Function
 
 function eval_anonymous_function(expr, env)
@@ -411,6 +428,10 @@ end
 
 function is_quote(expr)
     expr isa QuoteNode || Meta.isexpr(expr, :quote)
+end
+
+function is_global(expr)
+    Meta.isexpr(expr, :global)    
 end
 
 function is_dump(expr)
