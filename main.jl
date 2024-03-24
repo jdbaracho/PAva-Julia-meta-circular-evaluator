@@ -280,6 +280,10 @@ function eval_call(expr, env)
 
     if eval_args
         values = map((arg) -> metajulia_eval(arg, env), values)
+        # if its an eval, remove quotes from arguments
+        if call_symbol == :eval
+            values = unwrap_quote(values, env)
+        end
     else
         values = wrap_quote(values)
     end
@@ -298,16 +302,26 @@ function make_assignment(name, value, env)
     value
 end
 
-# Doesn't evaluate right side of assignment (functions, fexprs, macros)
-# TODO probably need to further separate macros and fexprs special things
+# Doesn't evaluate right side of assignment (functions, macros)
+# TODO probably need to further separate macros special things
 function eval_assignment_typed(type, expr, env)
     name = expr.args[1].args[1]
     args = expr.args[1].args[2:end]
     body = expr.args[2]
     # Value to be saved (env = environment where function was defined)
     value = Expr(:typed, type, args, body, env)
+    if type == :fexpr 
+        value.args[4] = extend_fexpr_eval(env)
+    end
     # Do the assignment
     make_assignment(name, value, env)
+end
+
+function extend_fexpr_eval(env)
+    # Environment with eval (fexpr!)
+    eval_name = :eval
+    eval_value = Expr(:typed, :function, [:expr], Expr(:block, :expr), env)
+    extend_environment([eval_name], [eval_value], env)
 end
 
 # Evaluate assignment for a variable (right side isn't a function body)
@@ -452,5 +466,20 @@ end
 function wrap_quote(args)
     map((arg) -> arg isa Symbol ? QuoteNode(arg) : Expr(:quote, arg), args)
 end
+
+function unwrap_quote(args, env)
+    args = map((arg) -> arg isa QuoteNode ? arg.value : arg.args[1], args) # ?? TODO [1] ok?
+    map((arg) -> metajulia_eval(arg, env), args)
+end
+
+# Initialize environment with primitives yadda yadda
+function init_env(env)
+    names = []
+    values = []
+    # Eval
+    # Augment global environment
+    augment_global(names, values, env)
+end
+init_env(ENVIRONMENT)
 
 repl()
