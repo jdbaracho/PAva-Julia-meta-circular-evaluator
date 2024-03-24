@@ -162,6 +162,7 @@ end
 #### If statement
 
 function eval_if_statement(expr, env)
+    dump(expr)
     if metajulia_eval(expr.args[1], env)
         metajulia_eval(expr.args[2], env)
     else
@@ -272,7 +273,7 @@ function eval_call(expr, env)
             body = call_value.args[3]
             func_env = call_value.args[4]
 
-            if type == :fexpr
+            if type == :fexpr || type == :macro
                 eval_args = false
             end
         end
@@ -285,14 +286,24 @@ function eval_call(expr, env)
             values = unwrap_quote(values, env)
         end
     else
-        values = wrap_quote(values)
+        if type == :fexpr 
+          values = wrap_quote(values)
+        end
     end
 
     # function call extends environment where it was created
     extended_env = extend_environment(arg_names, values, func_env)
     
     # Evaluate the function block with the extended environment
-    metajulia_eval(body, extended_env)
+    res = metajulia_eval(body, extended_env)
+    if (type == :macro)
+        if Meta.isexpr(res, :quote)
+            return metajulia_eval(res.args[1], extended_env) # TODO [1] ok?? :)
+        else
+            return res.value
+        end
+    end
+    res
 end
 
 #### Assignment
@@ -310,7 +321,7 @@ function eval_assignment_typed(type, expr, env)
     body = expr.args[2]
     # Value to be saved (env = environment where function was defined)
     value = Expr(:typed, type, args, body, env)
-    if type == :fexpr 
+    if type == :fexpr
         value.args[4] = extend_fexpr_eval(env)
     end
     # Do the assignment
