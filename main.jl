@@ -10,7 +10,7 @@ function metajulia_eval(expr, env)
     elseif is_name(expr)
         eval_name(expr, env)
     elseif is_quote(expr)
-        eval_quote(expr, 2, env)
+        eval_quote(expr, env)
     elseif is_let(expr)
         eval_let(expr, env)
     elseif is_anonymous_function(expr)
@@ -371,15 +371,14 @@ end
 #### Quote
 
 # This is really ugly and maybe we can just ditch QuoteNodes
-function eval_quote(expr, depth, env)
-    new_expr = copy(expr)
-    if depth > 0
-        if expr isa Expr
-            new_expr.args = map((arg) -> Meta.isexpr(arg, :$) ? metajulia_eval(arg.args[1], env)
-                                     : (arg isa QuoteNode ? eval_quote_node(arg) : eval_quote(arg, depth - 1, env)), expr.args)
-        elseif expr isa QuoteNode
-            return eval_quote_node(expr)
-        end
+function eval_quote(expr, env)
+    new_expr = expr
+    if expr isa Expr
+        new_expr = copy(expr)
+        new_expr.args = map((arg) -> Meta.isexpr(arg, :$) ? metajulia_eval(arg.args[1], env)
+                                 : (arg isa QuoteNode ? eval_quote_node(arg) : eval_quote(arg, env)), expr.args)
+    elseif expr isa QuoteNode
+        return eval_quote_node(expr)
     end
     new_expr
 end
