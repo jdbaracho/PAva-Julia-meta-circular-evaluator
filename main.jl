@@ -162,7 +162,6 @@ end
 #### If statement
 
 function eval_if_statement(expr, env)
-    dump(expr)
     if metajulia_eval(expr.args[1], env)
         metajulia_eval(expr.args[2], env)
     else
@@ -298,7 +297,8 @@ function eval_call(expr, env)
     res = metajulia_eval(body, extended_env)
     if (type == :macro)
         if Meta.isexpr(res, :quote)
-            return metajulia_eval(res.args[1], extended_env) # TODO [1] ok?? :)
+            # Evaluate macro body once more, now on parent environment
+            return metajulia_eval(res.args[1], env) # TODO [1] ok?? :)
         else
             return res.value
         end
@@ -372,15 +372,16 @@ end
 
 # This is really ugly and maybe we can just ditch QuoteNodes
 function eval_quote(expr, depth, env)
+    new_expr = copy(expr)
     if depth > 0
         if expr isa Expr
-            expr.args = map((arg) -> Meta.isexpr(arg, :$) ? metajulia_eval(arg.args[1], env)
-                                     : (arg isa QuoteNode ? eval_quote_node(expr) : eval_quote(arg, depth - 1, env)), expr.args)
+            new_expr.args = map((arg) -> Meta.isexpr(arg, :$) ? metajulia_eval(arg.args[1], env)
+                                     : (arg isa QuoteNode ? eval_quote_node(arg) : eval_quote(arg, depth - 1, env)), expr.args)
         elseif expr isa QuoteNode
             return eval_quote_node(expr)
         end
     end
-    expr
+    new_expr
 end
 
 function eval_quote_node(node)
@@ -479,8 +480,8 @@ function wrap_quote(args)
 end
 
 function unwrap_quote(args, env)
-    args = map((arg) -> arg isa QuoteNode ? arg.value : arg.args[1], args) # ?? TODO [1] ok?
-    map((arg) -> metajulia_eval(arg, env), args)
+    new_args = map((arg) -> arg isa QuoteNode ? arg.value : arg.args[1], args) # ?? TODO [1] ok?
+    map((arg) -> metajulia_eval(arg, env), new_args)
 end
 
 # Initialize environment with primitives yadda yadda
