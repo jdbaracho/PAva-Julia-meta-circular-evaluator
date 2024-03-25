@@ -282,10 +282,18 @@ function eval_call(expr, env)
         values = map((arg) -> metajulia_eval(arg, env), values)
         # if its an eval, remove quotes from arguments
         if call_symbol == :eval
-            values = unwrap_quote(values, env)
+            # also, find the environment that should be used for the evaluation
+            eval_obj = search_env(Symbol("EVALENV"), env)[Symbol("EVALENV")]
+            eval_env = (eval_obj.args[1]).args[1] # Kinda scuffed cause its quoted...
+            values = unwrap_quote(values, eval_env)
         end
     else
         if type == :fexpr 
+          # Save current environment (copy???) in case eval is present in fexpr body
+          env_name = Symbol("EVALENV")
+          env_value = Expr(:EVALENV, env)
+          append!(arg_names, [env_name])
+          append!(values, [env_value])
           values = wrap_quote(values)
         end
     end
@@ -487,7 +495,6 @@ end
 function init_env(env)
     names = []
     values = []
-    # Eval
     # Augment global environment
     augment_global(names, values, env)
 end
