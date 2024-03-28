@@ -242,7 +242,6 @@ end
 
 function eval_call(expr, env)
     values = expr.args[2:end]
-    extended_env = copy(env) # Environment for the function block
 
     if is_anonymous_call(expr)
         call_value = eval_call_anonymous(expr, env)
@@ -280,12 +279,14 @@ function eval_call_macro(arg_names, body, func_env, values, env)
 end
 
 function eval_call_fexpr(arg_names, body, func_env, values, env)
-    # Save current environment (copy???) in case eval is present in fexpr body
-    eval_obj = search_env(:eval, func_env)[:eval]
-    eval_obj.env = env
-
     # function call extends environment where it was created
     extended_env = extend_environment(arg_names, values, func_env)
+    augment_fexpr_eval(extended_env)
+
+    # Save current environment (copy???) in case eval is present in fexpr body
+    eval_obj = search_env(:eval, extended_env)[:eval]
+    eval_obj.env = env
+
     # Evaluate the function block with the extended environment
     eval(body, extended_env)
 end
@@ -351,7 +352,7 @@ function eval_assignment_fexpr(expr, env)
     args = expr.args[1].args[2:end]
     body = expr.args[2]
     # Value to be saved (env = environment where function was defined)
-    value = Fexpr(args, body, extend_fexpr_eval(env))
+    value = Fexpr(args, body, env) #extend_fexpr_eval(env))
     # Do the assignment
     make_assignment(name, value, env)
 end
@@ -367,11 +368,11 @@ function eval_assignment_macro(expr, env)
     make_assignment(name, value, env)
 end
 
-function extend_fexpr_eval(env)
+function augment_fexpr_eval(env)
     # Environment with eval (fexpr!)
     eval_name = :eval
     eval_value = Function([Symbol(",expr")], Expr(:block, Symbol(",expr")), env)
-    extend_environment([eval_name], [eval_value], env)
+    augment_environment([eval_name], [eval_value], env)
 end
 
 # Evaluate assignment for a variable (right side isn't a function body)
