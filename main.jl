@@ -12,17 +12,17 @@ struct Fexpr
     args::Array{Any}
     body::Any
     env::Any
- end
+end
 
- Base.show(io::IO, s::Fexpr) = print(io::IO, "<fexpr>")
+Base.show(io::IO, s::Fexpr) = print(io::IO, "<fexpr>")
 
 struct Macro
-     args::Array{Any}
-     body::Any
-     env::Any
-  end
+    args::Array{Any}
+    body::Any
+    env::Any
+end
 
-  Base.show(io::IO, s::Macro) = print(io::IO, "<macro>")
+Base.show(io::IO, s::Macro) = print(io::IO, "<macro>")
 
 function eval(expr, env)
     if is_incomplete(expr)
@@ -92,7 +92,6 @@ function repl()
 end
 
 ## Environment ###################################
-#region
 
 function extend_environment(names, values, env)
     new_env = copy(env)
@@ -164,8 +163,6 @@ function search_local(name, env)
     # or nothing if name not defined
     nothing
 end
-
-#endregion
 
 ## Evals #########################################
 
@@ -309,7 +306,7 @@ function eval_call_base(call_symbol, values, env)
     # if not base function
     if !(call_symbol in names(Base))
         error("Unbound name -- EVAL-CALL(", call_symbol, ")")
-    
+
     else # in Base
         values = map((arg) -> eval(arg, env), values)
         call_func = getfield(Base, call_symbol)
@@ -418,9 +415,9 @@ function eval_quote(expr, force, env)
     if expr isa Expr
         new_expr = copy(expr)
         new_expr.args = map((arg) -> Meta.isexpr(arg, :$) ? eval(arg.args[1], env)
-                                 : (arg isa QuoteNode ? eval_quote_node(arg) : eval_quote(arg, false, env)), expr.args)
+                                     : (arg isa QuoteNode ? eval_quote_node(arg) : eval_quote(arg, false, env)), expr.args)
     end
-    if is_quote_node(new_expr) 
+    if is_quote_node(new_expr)
         return eval_quote_node(new_expr)
     end
     if force
@@ -431,9 +428,9 @@ end
 
 function eval_quote_node(node)
     if node isa QuoteNode
-      (is_self_evaluating(node.value) || node.value isa Symbol) ? node.value : node
+        (is_self_evaluating(node.value) || node.value isa Symbol) ? node.value : node
     else
-      node.args[1]
+        node.args[1]
     end
 end
 
@@ -506,12 +503,12 @@ function is_quote(expr)
 end
 
 function is_quote_node(expr)
-    expr isa QuoteNode || Meta.isexpr(expr, :quote) && length(expr.args) == 1 && 
-      (is_self_evaluating(expr.args[1]) || expr.args[1] isa Symbol)
+    expr isa QuoteNode || Meta.isexpr(expr, :quote) && length(expr.args) == 1 &&
+                              (is_self_evaluating(expr.args[1]) || expr.args[1] isa Symbol)
 end
 
 function is_global(expr)
-    Meta.isexpr(expr, :global)    
+    Meta.isexpr(expr, :global)
 end
 
 function is_dump(expr)
