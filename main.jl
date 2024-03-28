@@ -1,3 +1,5 @@
+### Structs ####################################################################
+
 struct Function
     args::Array{Any}
     body::Any
@@ -5,12 +7,12 @@ struct Function
 end
 Base.show(io::IO, s::Function) = print(io::IO, "<function>")
 
-mutable struct MetaEval
+mutable struct Eval
     args::Array{Any}
     body::Any
     env::Any
 end
-Base.show(io::IO, s::MetaEval) = print(io::IO, "<function>")
+Base.show(io::IO, s::Eval) = print(io::IO, "<function>")
 
 struct Fexpr
     args::Array{Any}
@@ -25,6 +27,8 @@ struct Macro
     env::Any
 end
 Base.show(io::IO, s::Macro) = print(io::IO, "<macro>")
+
+## Repl ########################################################################
 
 function eval(expr, env)
     if is_incomplete(expr)
@@ -101,7 +105,7 @@ function clean_environment()
     [Dict()]
 end
 
-## Environment ###################################
+## Environment #################################################################
 
 function extend_environment(names, values, env)
     # extend current environment
@@ -171,9 +175,9 @@ function search_local(name, env)
     nothing
 end
 
-## Evals #########################################
+## Evals #######################################################################
 
-#### Block
+## Block
 
 function eval_block(expr, env)
     # filter out linenumbernodes
@@ -187,7 +191,7 @@ function filter_linenumbernodes(args)
     filter((arg) -> !(arg isa LineNumberNode), args)
 end
 
-#### If statement
+## If statement
 
 function eval_if_statement(expr, env)
     if eval(expr.args[1], env)
@@ -197,19 +201,19 @@ function eval_if_statement(expr, env)
     end
 end
 
-#### Or (||)
+## Or (||)
 
 function eval_or_operator(expr, env)
     eval(expr.args[1], env) || eval(expr.args[2], env)
 end
 
-#### And (&&)
+## And (&&)
 
 function eval_and_operator(expr, env)
     eval(expr.args[1], env) && eval(expr.args[2], env)
 end
 
-#### Let
+## Let
 
 function eval_let(expr, env)
     if Meta.isexpr(expr.args[1], :block)
@@ -237,7 +241,7 @@ function eval_let(expr, env)
     eval(expr.args[2], extended_env)
 end
 
-#### Name
+## Name
 
 function eval_name(name, env)
     name_env = search_env(name, env)
@@ -247,7 +251,7 @@ function eval_name(name, env)
     name_env[name]
 end
 
-#### Call
+## Call
 
 function eval_call(expr, env)
     values = expr.args[2:end]
@@ -272,7 +276,7 @@ function eval_call(expr, env)
 
     if call_value isa Function
         eval_call_function(arg_names, body, func_env, values, env, false)
-    elseif call_value isa MetaEval
+    elseif call_value isa Eval
         eval_call_function(arg_names, body, func_env, values, env, true)
     elseif call_value isa Fexpr
         eval_call_fexpr(arg_names, body, func_env, values, env)
@@ -305,7 +309,7 @@ end
 function augment_fexpr_eval(env)
     # add eval to the fexpr environment
     eval_name = :eval
-    eval_value = MetaEval(nothing, nothing, env)
+    eval_value = Eval([:x], :x, env)
     augment_environment([eval_name], [eval_value], env)
 end
 
@@ -349,7 +353,7 @@ function eval_call_anonymous(expr, env)
     Function(arg_names, body, func_env)
 end
 
-#### Assignment
+## Assignment
 
 function make_assignment(name, value, env)
     augment_environment([name], [value], env)
@@ -407,7 +411,7 @@ function eval_global(expr, env)
     make_assignment(name, value, [global_environment(env)])
 end
 
-### Anonymous Function
+## Anonymous Function
 
 function eval_anonymous_function(expr, env)
     args = expr.args[1] isa Symbol ? [expr.args[1]] : expr.args[1].args
@@ -415,7 +419,7 @@ function eval_anonymous_function(expr, env)
     Function(args, body, env)
 end
 
-#### Quote
+## Quote
 
 function eval_quote(expr, force, env)
     new_expr = expr
@@ -441,7 +445,7 @@ function eval_quote_node(node)
     end
 end
 
-## Type tests #########################################
+## Type tests ##################################################################
 
 function is_self_evaluating(expr)
     expr isa Number ||
