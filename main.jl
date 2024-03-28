@@ -1,6 +1,6 @@
 const ENVIRONMENT = [Dict()]
 
-struct Function
+mutable struct Function
     args::Array{Any}
     body::Any
     env::Any
@@ -34,7 +34,7 @@ function eval(expr, env)
     elseif is_name(expr)
         eval_name(expr, env)
     elseif is_quote(expr)
-        eval_quote(expr, env)
+        eval_quote(expr, true, env)
     elseif is_let(expr)
         eval_let(expr, env)
     elseif is_anonymous_function(expr)
@@ -301,21 +301,14 @@ function eval_call(expr, env)
 
     if eval_args
         values = map((arg) -> eval(arg, env), values)
-        # if its an eval, remove quotes from arguments
-        if call_symbol == :eval
-            # also, find the environment that should be used for the evaluation
-            eval_obj = search_env(Symbol("EVALENV"), env)[Symbol("EVALENV")]
-            eval_env = (eval_obj.args[1]).args[1] # Kinda scuffed cause its quoted...
-            values = unwrap_quote(values, eval_env)
+        if length(arg_names) == 1 && arg_names[1] == Symbol(",expr")
+            values = map((arg) -> eval(arg, func_env), values)
         end
     else
         if call_value isa Fexpr 
           # Save current environment (copy???) in case eval is present in fexpr body
-          env_name = Symbol("EVALENV")
-          env_value = Expr(:EVALENV, env)
-          append!(arg_names, [env_name])
-          append!(values, [env_value])
-          values = wrap_quote(values)
+          eval_obj = search_env(:eval, func_env)[:eval]
+          eval_obj.env = env
         end
     end
 
@@ -325,12 +318,7 @@ function eval_call(expr, env)
     # Evaluate the function block with the extended environment
     res = eval(body, extended_env)
     if (call_value isa Macro)
-        if Meta.isexpr(res, :quote)
-            # Evaluate macro body once more, now on parent environment
-            return eval(res.args[1], env) # TODO [1] ok?? :)
-        else
-            return res.value
-        end
+        return eval(res, env)
     end
     res
 end
@@ -364,7 +352,7 @@ end
 function extend_fexpr_eval(env)
     # Environment with eval (fexpr!)
     eval_name = :eval
-    eval_value = Function([:expr], Expr(:block, :expr), env) # Expr(:typed, :function, [:expr], Expr(:block, :expr), env)
+    eval_value = Function([Symbol(",expr")], Expr(:block, Symbol(",expr")), env)
     extend_environment([eval_name], [eval_value], env)
 end
 
@@ -404,20 +392,28 @@ end
 #### Quote
 
 # This is really ugly and maybe we can just ditch QuoteNodes
-function eval_quote(expr, env)
+function eval_quote(expr, force, env)
     new_expr = expr
     if expr isa Expr
         new_expr = copy(expr)
         new_expr.args = map((arg) -> Meta.isexpr(arg, :$) ? eval(arg.args[1], env)
-                                 : (arg isa QuoteNode ? eval_quote_node(arg) : eval_quote(arg, env)), expr.args)
-    elseif expr isa QuoteNode
-        return eval_quote_node(expr)
+                                 : (arg isa QuoteNode ? eval_quote_node(arg) : eval_quote(arg, false, env)), expr.args)
+    end
+    if is_quote_node(new_expr) 
+        return eval_quote_node(new_expr)
+    end
+    if force
+        return new_expr.args[1]
     end
     new_expr
 end
 
 function eval_quote_node(node)
-    (is_self_evaluating(node.value) || node.value isa Symbol) ? node.value : node
+    if node isa QuoteNode
+      (is_self_evaluating(node.value) || node.value isa Symbol) ? node.value : node
+    else
+      node.args[1]
+    end
 end
 
 ## Type tests #########################################
@@ -488,6 +484,11 @@ function is_quote(expr)
     expr isa QuoteNode || Meta.isexpr(expr, :quote)
 end
 
+function is_quote_node(expr)
+    expr isa QuoteNode || Meta.isexpr(expr, :quote) && length(expr.args) == 1 && 
+      (is_self_evaluating(expr.args[1]) || expr.args[1] isa Symbol)
+end
+
 function is_global(expr)
     Meta.isexpr(expr, :global)    
 end
@@ -505,15 +506,6 @@ end
 function filter_linenumbernodes(args)
     # Filter out linenumbernodes
     filter((arg) -> !(arg isa LineNumberNode), args)
-end
-
-function wrap_quote(args)
-    map((arg) -> arg isa Symbol ? QuoteNode(arg) : Expr(:quote, arg), args)
-end
-
-function unwrap_quote(args, env)
-    new_args = map((arg) -> arg isa QuoteNode ? arg.value : arg.args[1], args) # ?? TODO [1] ok?
-    map((arg) -> eval(arg, env), new_args)
 end
 
 # Initialize environment with primitives yadda yadda
