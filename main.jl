@@ -268,7 +268,7 @@ function eval_call(expr, env)
             # call_value = Expr(:typed, type, args, block)
             call_value = call_env[call_symbol]
             type = call_value.args[1]
-            arg_names = call_value.args[2]
+            arg_names = copy(call_value.args[2])
             body = call_value.args[3]
             func_env = call_value.args[4]
 
