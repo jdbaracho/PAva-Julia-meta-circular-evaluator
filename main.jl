@@ -1,6 +1,6 @@
-const ENVIRONMENT = [Dict()]
+ENVIRONMENT = [Dict()]
 
-function metajulia_eval(expr, env)
+function eval(expr, env)
     if is_incomplete(expr)
         error("EVAL: Incomplete expression!")
     elseif is_dump(expr)
@@ -41,6 +41,10 @@ function metajulia_eval(expr, env)
     end
 end
 
+function metajulia_eval(expr)
+    eval(expr, ENVIRONMENT)
+end
+
 function repl()
     print(">> ")
     input = readline(keep=true)
@@ -57,7 +61,7 @@ function repl()
         repl()
     end
 
-    output = metajulia_eval(expr, ENVIRONMENT)
+    output = eval(expr, ENVIRONMENT)
     display(output)
     repl()
 end
@@ -155,30 +159,30 @@ end
 function eval_block(expr, env)
     # Filter out linenumbernodes
     lines = filter_linenumbernodes(expr.args)
-    resolved_lines = map((line) -> metajulia_eval(line, env), lines)
+    resolved_lines = map((line) -> eval(line, env), lines)
     resolved_lines[end]
 end
 
 #### If statement
 
 function eval_if_statement(expr, env)
-    if metajulia_eval(expr.args[1], env)
-        metajulia_eval(expr.args[2], env)
+    if eval(expr.args[1], env)
+        eval(expr.args[2], env)
     else
-        metajulia_eval(expr.args[3], env)
+        eval(expr.args[3], env)
     end
 end
 
 #### Or (||)
 
 function eval_or_operator(expr, env)
-    metajulia_eval(expr.args[1], env) || metajulia_eval(expr.args[2], env)
+    eval(expr.args[1], env) || eval(expr.args[2], env)
 end
 
 #### And (&&)
 
 function eval_and_operator(expr, env)
-    metajulia_eval(expr.args[1], env) && metajulia_eval(expr.args[2], env)
+    eval(expr.args[1], env) && eval(expr.args[2], env)
 end
 
 #### Let
@@ -205,14 +209,14 @@ function eval_let(expr, env)
                 value = Expr(:typed, :function, args, body, env)
             else
                 name = a.args[1]
-                value = metajulia_eval(a.args[2], extended_env)
+                value = eval(a.args[2], extended_env)
             end
             # extend environment for each assignment
             extended_env = augment_current([name], [value], extended_env)
         end
     end
     # let block
-    metajulia_eval(expr.args[2], extended_env)
+    eval(expr.args[2], extended_env)
 end
 
 #### Name
@@ -258,7 +262,7 @@ function eval_call(expr, env)
                 error("Unbound name -- EVAL-CALL(", call_symbol, ")")
 
             else # in Base
-                values = map((arg) -> metajulia_eval(arg, env), values)
+                values = map((arg) -> eval(arg, env), values)
                 call_func = getfield(Base, call_symbol)
                 return call_func(values...)
             end
@@ -279,7 +283,7 @@ function eval_call(expr, env)
     end
 
     if eval_args
-        values = map((arg) -> metajulia_eval(arg, env), values)
+        values = map((arg) -> eval(arg, env), values)
         # if its an eval, remove quotes from arguments
         if call_symbol == :eval
             # also, find the environment that should be used for the evaluation
@@ -302,11 +306,11 @@ function eval_call(expr, env)
     extended_env = extend_environment(arg_names, values, func_env)
     
     # Evaluate the function block with the extended environment
-    res = metajulia_eval(body, extended_env)
+    res = eval(body, extended_env)
     if (type == :macro)
         if Meta.isexpr(res, :quote)
             # Evaluate macro body once more, now on parent environment
-            return metajulia_eval(res.args[1], env) # TODO [1] ok?? :)
+            return eval(res.args[1], env) # TODO [1] ok?? :)
         else
             return res.value
         end
@@ -348,7 +352,7 @@ function eval_assignment_var(expr, env)
     name = expr.args[1]
     rightSide = expr.args[2]
     # Not a function definition, evaluate the right side
-    value = metajulia_eval(rightSide, env)
+    value = eval(rightSide, env)
     # Do the assignment
     make_assignment(name, value, env)
 end
@@ -364,7 +368,7 @@ function eval_global(expr, env)
         name = assignemnt
     end
 
-    value = metajulia_eval(expr, env)
+    value = eval(expr, env)
     make_assignment(name, value, [global_environment(env)])
 end
 
@@ -383,7 +387,7 @@ function eval_quote(expr, env)
     new_expr = expr
     if expr isa Expr
         new_expr = copy(expr)
-        new_expr.args = map((arg) -> Meta.isexpr(arg, :$) ? metajulia_eval(arg.args[1], env)
+        new_expr.args = map((arg) -> Meta.isexpr(arg, :$) ? eval(arg.args[1], env)
                                  : (arg isa QuoteNode ? eval_quote_node(arg) : eval_quote(arg, env)), expr.args)
     elseif expr isa QuoteNode
         return eval_quote_node(expr)
@@ -488,7 +492,7 @@ end
 
 function unwrap_quote(args, env)
     new_args = map((arg) -> arg isa QuoteNode ? arg.value : arg.args[1], args) # ?? TODO [1] ok?
-    map((arg) -> metajulia_eval(arg, env), new_args)
+    map((arg) -> eval(arg, env), new_args)
 end
 
 # Initialize environment with primitives yadda yadda
