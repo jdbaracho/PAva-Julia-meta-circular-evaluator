@@ -1,5 +1,3 @@
-const ENVIRONMENT = [Dict()]
-
 mutable struct Function
     args::Array{Any}
     body::Any
@@ -26,9 +24,7 @@ Base.show(io::IO, s::Macro) = print(io::IO, "<macro>")
 
 function eval(expr, env)
     if is_incomplete(expr)
-        error("EVAL: Incomplete expression!")
-    elseif is_dump(expr)
-        println(env)
+        error("Incomplete expression -- EVAL-EXPR(", expr, ")")
     elseif is_self_evaluating(expr)
         expr
     elseif is_name(expr)
@@ -60,40 +56,51 @@ function eval(expr, env)
     elseif is_block(expr)
         eval_block(expr, env)
     else
-        error("EVAL(", typeof(expr), "): Not implemented!")
-        # error("Unknown expression type: $(typeof(expr))")
+        error("Not implemented -- EVAL(", typeof(expr), ")")
     end
 end
 
 function metajulia_eval(expr)
-    eval(expr, ENVIRONMENT)
+    eval(expr, clean_environment())
 end
 
 function repl()
+    env = clean_environment()
+
+    while true
+        expr = read_input()
+        expr isa Nothing ? continue :
+        quit(expr) ? break :
+        value = eval(expr, env)
+        show(value)
+        println()
+    end
+end
+
+function quit(expr)
+    expr == :quit
+end
+
+function read_input()
     print(">> ")
     input = readline(keep=true)
     expr = Meta.parse(input)
     while Meta.isexpr(expr, :incomplete)
-        print("   ")
+        print('\t')
         input *= readline(keep=true)
         expr = Meta.parse(input)
     end
-    if expr == :quit
-        return
-    end
-    if isnothing(expr)
-        repl()
-    end
+    expr
+end
 
-    output = eval(expr, ENVIRONMENT)
-    show(output)
-    println()
-    repl()
+function clean_environment()
+    [Dict()]
 end
 
 ## Environment ###################################
 
 function extend_environment(names, values, env)
+    # extend current environment
     new_env = copy(env)
     local_env = Dict(names[i] => values[i] for i in eachindex(names))
     pushfirst!(new_env, local_env)
@@ -108,12 +115,14 @@ function augment_environment(names, values, env)
 end
 
 function augment_global(names, values, env)
+    # add name to global environment
     for i in eachindex(names)
         global_environment(env)[names[i]] = values[1]
     end
 end
 
 function augment_local(names, values, env)
+    # update name if it exists, add name if not
     for i in eachindex(names)
         local_env = search_local(names[i], env)
         if isnothing(local_env)
@@ -124,18 +133,12 @@ function augment_local(names, values, env)
     end
 end
 
-function augment_current(names, values, env)
-    for i in eachindex(names)
-        env[1][names[i]] = values[i]
-    end
-    env
-end
-
 function global_environment(env)
     env[end]
 end
 
 function search_env(name, env)
+    # return environment where name is defined
     name_env = search_local(name, env)
     if isnothing(name_env)
         name_env = search_global(name, env)
@@ -153,10 +156,10 @@ function search_global(name, env)
 end
 
 function search_local(name, env)
-    # search all local envs
+    # search all local environments
     for i in eachindex(env[1:end-1])
         if haskey(env[i], name)
-            # return first env with name
+            # return first environment with name
             return env[i]
         end
     end
@@ -169,10 +172,15 @@ end
 #### Block
 
 function eval_block(expr, env)
-    # Filter out linenumbernodes
+    # filter out linenumbernodes
     lines = filter_linenumbernodes(expr.args)
     resolved_lines = map((line) -> eval(line, env), lines)
     resolved_lines[end]
+end
+
+function filter_linenumbernodes(args)
+    # filter out linenumbernodes
+    filter((arg) -> !(arg isa LineNumberNode), args)
 end
 
 #### If statement
@@ -199,7 +207,6 @@ end
 
 #### Let
 
-## TODO
 function eval_let(expr, env)
     if Meta.isexpr(expr.args[1], :block)
         assignments = expr.args[1].args
@@ -218,13 +225,11 @@ function eval_let(expr, env)
         elseif is_assignment_var(a)
             eval_assignment_var(a, extended_env)
         else
-            error("Let: Expected assignment but got expression of
-             type(", typeof(expr), ")")
+            error("Expected assignment but got expression of
+             type(", typeof(a), ") -- EVAL-LET(", expr, ")")
         end
-        # extend environment for each assignment
-        # extended_env = augment_current([name], [value], extended_env)
     end
-    # let block
+    # let body
     eval(expr.args[2], extended_env)
 end
 
@@ -254,9 +259,9 @@ function eval_call(expr, env)
             return eval_call_base(call_symbol, values, env)
         end # in env
 
-        # Map argument symbols to argument values in function block environment
         call_value = call_env[call_symbol]
     end
+
     arg_names = copy(call_value.args)
     body = call_value.body
     func_env = call_value.env
@@ -273,8 +278,8 @@ end
 function eval_call_macro(arg_names, body, func_env, values, env)
     # function call extends environment where it was created
     extended_env = extend_environment(arg_names, values, func_env)
-    # Evaluate the function block with the extended environment
-    # And eval the result
+    # evaluate the function block with the extended environment
+    # and eval the result
     eval(eval(body, extended_env), env)
 end
 
@@ -283,15 +288,23 @@ function eval_call_fexpr(arg_names, body, func_env, values, env)
     extended_env = extend_environment(arg_names, values, func_env)
     augment_fexpr_eval(extended_env)
 
-    # Save current environment (copy???) in case eval is present in fexpr body
+    # save environment where eval was called to evaluate arguments
     eval_obj = search_env(:eval, extended_env)[:eval]
     eval_obj.env = env
 
-    # Evaluate the function block with the extended environment
+    # evaluate the function block with the extended environment
     eval(body, extended_env)
 end
 
+function augment_fexpr_eval(env)
+    # add eval to the fexpr environment
+    eval_name = :eval
+    eval_value = Function([Symbol(",expr")], Expr(:block, Symbol(",expr")), env)
+    augment_environment([eval_name], [eval_value], env)
+end
+
 function eval_call_function(arg_names, body, func_env, values, env)
+    # evaluate arguments
     values = map((arg) -> eval(arg, env), values)
     if length(arg_names) == 1 && arg_names[1] == Symbol(",expr")
         values = map((arg) -> eval(arg, func_env), values)
@@ -309,6 +322,7 @@ function eval_call_base(call_symbol, values, env)
         error("Unbound name -- EVAL-CALL(", call_symbol, ")")
 
     else # in Base
+        # evaluate arguments
         values = map((arg) -> eval(arg, env), values)
         call_func = getfield(Base, call_symbol)
         return call_func(values...)
@@ -317,7 +331,6 @@ end
 
 function eval_call_anonymous(expr, env)
     # Anonymous function
-    # Map argument symbols to argument values in function block environment
     arg_names = expr.args[1].args[1]
     if arg_names isa Symbol
         arg_names = [arg_names]
@@ -341,9 +354,8 @@ function eval_assignment_function(expr, env)
     name = expr.args[1].args[1]
     args = expr.args[1].args[2:end]
     body = expr.args[2]
-    # Value to be saved (env = environment where function was defined)
+    # save environment where function was defined
     value = Function(args, body, env)
-    # Do the assignment
     make_assignment(name, value, env)
 end
 
@@ -351,37 +363,26 @@ function eval_assignment_fexpr(expr, env)
     name = expr.args[1].args[1]
     args = expr.args[1].args[2:end]
     body = expr.args[2]
-    # Value to be saved (env = environment where function was defined)
-    value = Fexpr(args, body, env) #extend_fexpr_eval(env))
-    # Do the assignment
+    # save environment where function was defined
+    value = Fexpr(args, body, env)
     make_assignment(name, value, env)
 end
 
-# Doesn't evaluate right side of assignment (functions, macros)
 function eval_assignment_macro(expr, env)
     name = expr.args[1].args[1]
     args = expr.args[1].args[2:end]
     body = expr.args[2]
-    # Value to be saved (env = environment where function was defined)
+    # save environment where function was defined
     value = Macro(args, body, env)
-    # Do the assignment
     make_assignment(name, value, env)
 end
 
-function augment_fexpr_eval(env)
-    # Environment with eval (fexpr!)
-    eval_name = :eval
-    eval_value = Function([Symbol(",expr")], Expr(:block, Symbol(",expr")), env)
-    augment_environment([eval_name], [eval_value], env)
-end
-
-# Evaluate assignment for a variable (right side isn't a function body)
 function eval_assignment_var(expr, env)
+    # Evaluate assignment for a variable
     name = expr.args[1]
-    rightSide = expr.args[2]
+    right_side = expr.args[2]
     # Not a function definition, evaluate the right side
-    value = eval(rightSide, env)
-    # Do the assignment
+    value = eval(right_side, env)
     make_assignment(name, value, env)
 end
 
@@ -405,12 +406,11 @@ end
 function eval_anonymous_function(expr, env)
     args = expr.args[1] isa Symbol ? [expr.args[1]] : expr.args[1].args
     body = expr.args[2]
-    Function(args, body, env) #Expr(:typed, :function, args, body, env)
+    Function(args, body, env)
 end
 
 #### Quote
 
-# Not the prettiest thing ever but... it works!
 function eval_quote(expr, force, env)
     new_expr = expr
     if expr isa Expr
@@ -511,29 +511,3 @@ end
 function is_global(expr)
     Meta.isexpr(expr, :global)
 end
-
-function is_dump(expr)
-    expr == :dump
-end
-
-function is_quit(expr)
-    expr == :quit
-end
-
-## Helper Functions ##############################
-
-function filter_linenumbernodes(args)
-    # Filter out linenumbernodes
-    filter((arg) -> !(arg isa LineNumberNode), args)
-end
-
-# Initialize environment with primitives yadda yadda
-function init_env(env)
-    names = []
-    values = []
-    # Augment global environment
-    augment_global(names, values, env)
-end
-init_env(ENVIRONMENT)
-
-# repl()
