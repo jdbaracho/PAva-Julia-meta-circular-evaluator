@@ -42,11 +42,11 @@ function eval(expr, env)
     elseif is_assignment_var(expr)
         eval_assignment_var(expr, env)
     elseif is_assignment_function(expr)
-        eval_assignment_typed(:function, expr, env)
+        eval_assignment_function(expr, env)
     elseif is_assignment_fexpr(expr)
-        eval_assignment_typed(:fexpr, expr, env)
+        eval_assignment_fexpr(expr, env)
     elseif is_assignment_macro(expr)
-        eval_assignment_typed(:macro, expr, env)
+        eval_assignment_macro(expr, env)
     elseif is_global(expr)
         eval_global(expr, env)
     elseif is_call(expr)
@@ -211,24 +211,21 @@ function eval_let(expr, env)
     end
 
     extended_env = extend_environment([], [], env)
-    if length(assignments) > 0 # TODO i think we can remove this
-
-        for a in assignments
-            # if function definition, dont eval the assignment
-            # value (function block) TODO macros, fexprs
-            if is_assignment_function(a)
-                name = a.args[1].args[1]
-                args = a.args[1].args[2:end]
-                body = a.args[2]
-                # Value to be saved (env = environment where function was defined)
-                value = Function(args, body, env) # Expr(:typed, :function, args, body, env)
-            else
-                name = a.args[1]
-                value = eval(a.args[2], extended_env)
-            end
-            # extend environment for each assignment
-            extended_env = augment_current([name], [value], extended_env)
+    for a in assignments
+        if is_assignment_function(a)
+            eval_assignment_function(a, extended_env)
+        elseif is_assignment_fexpr(a)
+            eval_assignment_fexpr(a, extended_env)
+        elseif is_assignment_macro(a)
+            eval_assignment_macro(a, extended_env)
+        elseif is_assignment_var(a)
+            eval_assignment_var(a, extended_env)
+        else
+            error("Let: Expected assignment but got expression of
+             type(", typeof(expr), ")")
         end
+        # extend environment for each assignment
+        # extended_env = augment_current([name], [value], extended_env)
     end
     # let block
     eval(expr.args[2], extended_env)
@@ -246,81 +243,93 @@ end
 
 #### Call
 
-## TODO
 function eval_call(expr, env)
-    # Evaluate/Resolve the argument values
-    call_symbol = nothing
-    call_value = nothing
     values = expr.args[2:end]
     extended_env = copy(env) # Environment for the function block
-    body = nothing # Function block (next expression to be evaluated)
-    eval_args = true
 
     if is_anonymous_call(expr)
-        # Anonymous function
-        # Map argument symbols to argument values in function block environment
-        arg_names = expr.args[1].args[1]
-        if arg_names isa Symbol
-            arg_names = [arg_names]
-        else # Expression
-            arg_names = arg_names.args
-        end
-        body = expr.args[1].args[2]
-        func_env = extended_env
+        call_value = eval_call_anonymous(expr, env)
     else
         call_symbol = expr.args[1]
-        # TODO handle call value being a symbol
         call_env = search_env(call_symbol, env)
 
-        # if not in env
+        # if not in env, then attempt to use base julia
         if isnothing(call_env)
-            # if not base function
-            if !(call_symbol in names(Base))
-                error("Unbound name -- EVAL-CALL(", call_symbol, ")")
+            return eval_call_base(call_symbol, values, env)
+        end # in env
 
-            else # in Base
-                values = map((arg) -> eval(arg, env), values)
-                call_func = getfield(Base, call_symbol)
-                return call_func(values...)
-            end
-
-        else # in env
-            # Map argument symbols to argument values in function block environment
-            # call_value = Expr(:typed, type, args, block)
-            call_value = call_env[call_symbol]
-            # type = call_value.args[1]
-            arg_names = copy(call_value.args)
-            body = call_value.body
-            func_env = call_value.env
-
-            if call_value isa Fexpr || call_value isa Macro
-                eval_args = false
-            end
-        end
+        # Map argument symbols to argument values in function block environment
+        call_value = call_env[call_symbol]
     end
+    arg_names = copy(call_value.args)
+    body = call_value.body
+    func_env = call_value.env
 
-    if eval_args
-        values = map((arg) -> eval(arg, env), values)
-        if length(arg_names) == 1 && arg_names[1] == Symbol(",expr")
-            values = map((arg) -> eval(arg, func_env), values)
-        end
-    else
-        if call_value isa Fexpr 
-          # Save current environment (copy???) in case eval is present in fexpr body
-          eval_obj = search_env(:eval, func_env)[:eval]
-          eval_obj.env = env
-        end
+    if call_value isa Function
+        eval_call_function(arg_names, body, func_env, values, env)
+    elseif call_value isa Fexpr
+        eval_call_fexpr(arg_names, body, func_env, values, env)
+    elseif call_value isa Macro
+        eval_call_macro(arg_names, body, func_env, values, env)
+    end
+end
+
+function eval_call_macro(arg_names, body, func_env, values, env)
+    # function call extends environment where it was created
+    extended_env = extend_environment(arg_names, values, func_env)
+    # Evaluate the function block with the extended environment
+    # And eval the result
+    eval(eval(body, extended_env), env)
+end
+
+function eval_call_fexpr(arg_names, body, func_env, values, env)
+    # Save current environment (copy???) in case eval is present in fexpr body
+    eval_obj = search_env(:eval, func_env)[:eval]
+    eval_obj.env = env
+
+    # function call extends environment where it was created
+    extended_env = extend_environment(arg_names, values, func_env)
+    # Evaluate the function block with the extended environment
+    eval(body, extended_env)
+end
+
+function eval_call_function(arg_names, body, func_env, values, env)
+    values = map((arg) -> eval(arg, env), values)
+    if length(arg_names) == 1 && arg_names[1] == Symbol(",expr")
+        values = map((arg) -> eval(arg, func_env), values)
     end
 
     # function call extends environment where it was created
     extended_env = extend_environment(arg_names, values, func_env)
-    
     # Evaluate the function block with the extended environment
-    res = eval(body, extended_env)
-    if (call_value isa Macro)
-        return eval(res, env)
+    eval(body, extended_env)
+end
+
+function eval_call_base(call_symbol, values, env)
+    # if not base function
+    if !(call_symbol in names(Base))
+        error("Unbound name -- EVAL-CALL(", call_symbol, ")")
+    
+    else # in Base
+        values = map((arg) -> eval(arg, env), values)
+        call_func = getfield(Base, call_symbol)
+        return call_func(values...)
     end
-    res
+end
+
+function eval_call_anonymous(expr, env)
+    # Anonymous function
+    # Map argument symbols to argument values in function block environment
+    arg_names = expr.args[1].args[1]
+    if arg_names isa Symbol
+        arg_names = [arg_names]
+    else # Expression
+        arg_names = arg_names.args
+    end
+    body = expr.args[1].args[2]
+    func_env = copy(env)
+
+    Function(arg_names, body, func_env)
 end
 
 #### Assignment
@@ -330,21 +339,33 @@ function make_assignment(name, value, env)
     value
 end
 
-# Doesn't evaluate right side of assignment (functions, macros)
-# TODO probably need to further separate macros special things
-function eval_assignment_typed(type, expr, env)
+function eval_assignment_function(expr, env)
     name = expr.args[1].args[1]
     args = expr.args[1].args[2:end]
     body = expr.args[2]
     # Value to be saved (env = environment where function was defined)
-    # value = Expr(:typed, type, args, body, env)
-    if type == :function
-        value = Function(args, body, env)
-    elseif type == :fexpr
-        value = Fexpr(args, body, extend_fexpr_eval(env))
-    elseif type == :macro
-        value = Macro(args, body, env)
-    end
+    value = Function(args, body, env)
+    # Do the assignment
+    make_assignment(name, value, env)
+end
+
+function eval_assignment_fexpr(expr, env)
+    name = expr.args[1].args[1]
+    args = expr.args[1].args[2:end]
+    body = expr.args[2]
+    # Value to be saved (env = environment where function was defined)
+    value = Fexpr(args, body, extend_fexpr_eval(env))
+    # Do the assignment
+    make_assignment(name, value, env)
+end
+
+# Doesn't evaluate right side of assignment (functions, macros)
+function eval_assignment_macro(expr, env)
+    name = expr.args[1].args[1]
+    args = expr.args[1].args[2:end]
+    body = expr.args[2]
+    # Value to be saved (env = environment where function was defined)
+    value = Macro(args, body, env)
     # Do the assignment
     make_assignment(name, value, env)
 end
@@ -391,7 +412,7 @@ end
 
 #### Quote
 
-# This is really ugly and maybe we can just ditch QuoteNodes
+# Not the prettiest thing ever but... it works!
 function eval_quote(expr, force, env)
     new_expr = expr
     if expr isa Expr
