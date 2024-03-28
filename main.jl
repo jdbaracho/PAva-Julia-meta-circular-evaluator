@@ -1,17 +1,22 @@
-mutable struct Function
+struct Function
     args::Array{Any}
     body::Any
     env::Any
 end
-
 Base.show(io::IO, s::Function) = print(io::IO, "<function>")
+
+mutable struct MetaEval
+    args::Array{Any}
+    body::Any
+    env::Any
+end
+Base.show(io::IO, s::MetaEval) = print(io::IO, "<function>")
 
 struct Fexpr
     args::Array{Any}
     body::Any
     env::Any
 end
-
 Base.show(io::IO, s::Fexpr) = print(io::IO, "<fexpr>")
 
 struct Macro
@@ -19,7 +24,6 @@ struct Macro
     body::Any
     env::Any
 end
-
 Base.show(io::IO, s::Macro) = print(io::IO, "<macro>")
 
 function eval(expr, env)
@@ -267,7 +271,9 @@ function eval_call(expr, env)
     func_env = call_value.env
 
     if call_value isa Function
-        eval_call_function(arg_names, body, func_env, values, env)
+        eval_call_function(arg_names, body, func_env, values, env, false)
+    elseif call_value isa MetaEval
+        eval_call_function(arg_names, body, func_env, values, env, true)
     elseif call_value isa Fexpr
         eval_call_fexpr(arg_names, body, func_env, values, env)
     elseif call_value isa Macro
@@ -299,14 +305,14 @@ end
 function augment_fexpr_eval(env)
     # add eval to the fexpr environment
     eval_name = :eval
-    eval_value = Function([Symbol(",expr")], Expr(:block, Symbol(",expr")), env)
+    eval_value = MetaEval(nothing, nothing, env)
     augment_environment([eval_name], [eval_value], env)
 end
 
-function eval_call_function(arg_names, body, func_env, values, env)
+function eval_call_function(arg_names, body, func_env, values, env, is_eval)
     # evaluate arguments
     values = map((arg) -> eval(arg, env), values)
-    if length(arg_names) == 1 && arg_names[1] == Symbol(",expr")
+    if is_eval
         values = map((arg) -> eval(arg, func_env), values)
     end
 
