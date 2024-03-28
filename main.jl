@@ -1,4 +1,28 @@
-ENVIRONMENT = [Dict()]
+const ENVIRONMENT = [Dict()]
+
+struct Function
+    args::Array{Any}
+    body::Any
+    env::Any
+end
+
+Base.show(io::IO, s::Function) = print(io::IO, "<function>")
+
+struct Fexpr
+    args::Array{Any}
+    body::Any
+    env::Any
+ end
+
+ Base.show(io::IO, s::Fexpr) = print(io::IO, "<fexpr>")
+
+struct Macro
+     args::Array{Any}
+     body::Any
+     env::Any
+  end
+
+  Base.show(io::IO, s::Macro) = print(io::IO, "<macro>")
 
 function eval(expr, env)
     if is_incomplete(expr)
@@ -62,18 +86,9 @@ function repl()
     end
 
     output = eval(expr, ENVIRONMENT)
-    display(output)
+    show(output)
+    println()
     repl()
-end
-
-function display(value)
-    if isnothing(value)
-        println()
-    elseif Meta.isexpr(value, :typed)
-        println("<$(value.args[1])>")
-    else
-        println(value)
-    end
 end
 
 ## Environment ###################################
@@ -206,7 +221,7 @@ function eval_let(expr, env)
                 args = a.args[1].args[2:end]
                 body = a.args[2]
                 # Value to be saved (env = environment where function was defined)
-                value = Expr(:typed, :function, args, body, env)
+                value = Function(args, body, env) # Expr(:typed, :function, args, body, env)
             else
                 name = a.args[1]
                 value = eval(a.args[2], extended_env)
@@ -234,6 +249,8 @@ end
 ## TODO
 function eval_call(expr, env)
     # Evaluate/Resolve the argument values
+    call_symbol = nothing
+    call_value = nothing
     values = expr.args[2:end]
     extended_env = copy(env) # Environment for the function block
     body = nothing # Function block (next expression to be evaluated)
@@ -271,12 +288,12 @@ function eval_call(expr, env)
             # Map argument symbols to argument values in function block environment
             # call_value = Expr(:typed, type, args, block)
             call_value = call_env[call_symbol]
-            type = call_value.args[1]
-            arg_names = copy(call_value.args[2])
-            body = call_value.args[3]
-            func_env = call_value.args[4]
+            # type = call_value.args[1]
+            arg_names = copy(call_value.args)
+            body = call_value.body
+            func_env = call_value.env
 
-            if type == :fexpr || type == :macro
+            if call_value isa Fexpr || call_value isa Macro
                 eval_args = false
             end
         end
@@ -292,7 +309,7 @@ function eval_call(expr, env)
             values = unwrap_quote(values, eval_env)
         end
     else
-        if type == :fexpr 
+        if call_value isa Fexpr 
           # Save current environment (copy???) in case eval is present in fexpr body
           env_name = Symbol("EVALENV")
           env_value = Expr(:EVALENV, env)
@@ -307,7 +324,7 @@ function eval_call(expr, env)
     
     # Evaluate the function block with the extended environment
     res = eval(body, extended_env)
-    if (type == :macro)
+    if (call_value isa Macro)
         if Meta.isexpr(res, :quote)
             # Evaluate macro body once more, now on parent environment
             return eval(res.args[1], env) # TODO [1] ok?? :)
@@ -332,9 +349,13 @@ function eval_assignment_typed(type, expr, env)
     args = expr.args[1].args[2:end]
     body = expr.args[2]
     # Value to be saved (env = environment where function was defined)
-    value = Expr(:typed, type, args, body, env)
-    if type == :fexpr
-        value.args[4] = extend_fexpr_eval(env)
+    # value = Expr(:typed, type, args, body, env)
+    if type == :function
+        value = Function(args, body, env)
+    elseif type == :fexpr
+        value = Fexpr(args, body, extend_fexpr_eval(env))
+    elseif type == :macro
+        value = Macro(args, body, env)
     end
     # Do the assignment
     make_assignment(name, value, env)
@@ -343,7 +364,7 @@ end
 function extend_fexpr_eval(env)
     # Environment with eval (fexpr!)
     eval_name = :eval
-    eval_value = Expr(:typed, :function, [:expr], Expr(:block, :expr), env)
+    eval_value = Function([:expr], Expr(:block, :expr), env) # Expr(:typed, :function, [:expr], Expr(:block, :expr), env)
     extend_environment([eval_name], [eval_value], env)
 end
 
@@ -377,7 +398,7 @@ end
 function eval_anonymous_function(expr, env)
     args = expr.args[1] isa Symbol ? [expr.args[1]] : expr.args[1].args
     body = expr.args[2]
-    Expr(:typed, :function, args, body, env)
+    Function(args, body, env) #Expr(:typed, :function, args, body, env)
 end
 
 #### Quote
@@ -396,7 +417,7 @@ function eval_quote(expr, env)
 end
 
 function eval_quote_node(node)
-    is_self_evaluating(node.value) ? node.value : node
+    (is_self_evaluating(node.value) || node.value isa Symbol) ? node.value : node
 end
 
 ## Type tests #########################################
@@ -504,4 +525,4 @@ function init_env(env)
 end
 init_env(ENVIRONMENT)
 
-repl()
+# repl()
